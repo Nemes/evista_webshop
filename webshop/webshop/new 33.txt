@@ -1,0 +1,379 @@
+C:\xampp\htdocs\webshop\common\config\bootstrap.php: Yii::setAlias('@rest', dirname(dirname(__DIR__)) . '/rest');
+
+C:\xampp\htdocs\webshop\common\models\User.php:
+<?php
+namespace common\models;
+
+use Yii;
+use yii\base\NotSupportedException;
+use yii\behaviors\TimestampBehavior;
+use yii\db\ActiveRecord;
+use yii\web\IdentityInterface;
+
+/**
+ * User model
+ *
+ * @property integer $id
+ * @property string $nev
+ * @property string $nem
+ * @property integer $szulev
+ * @property string $auth_key
+ * @property string $activation_key
+ * @property string $rest_token
+ * @property string $password_hash
+ * @property string $password_reset_token
+ * @property string $email
+ * @property string $megjegyzes
+ * @property integer $statusz
+ * @property string $utolso_bejelentkezes
+ * @property string $letrehozva
+ * @property string $modositva
+ * @property string $password write-only password
+ */
+class User extends ActiveRecord implements IdentityInterface
+{
+    const STATUS_DELETED = 0;
+    const STATUS_ACTIVE = 10;
+    const STATUS_INACTIVE = 20;
+
+    const NEM_FERFI = 'F';
+    const NEM_NO = 'N';
+
+    const ROLE_PROJEKT_FELHASZNALO = 10;
+    const ROLE_PROJEKT_ADMINISZTRATOR = 20;
+    const ROLE_PROJEKT_KISERLETISZEMELY = 30;
+    const ROLE_ADMIN = 100;
+
+    // új felhasználó felvétele esetén kötelező megadni a jelszót
+    const SCENARIO_NEW_FELHASZNALO = 'new-felhasznalo';
+    const SCENARIO_EDIT_FELHASZNALO = 'edit-felhasznalo';
+    const SCENARIO_EDIT_KISERLETISZEMELY = 'edit-kiserletiszemely';
+    const SCENARIO_EDIT_REST = 'edit-rest';
+
+    public $password_string;
+    public $password_string_repeat;
+
+    /**
+     * @inheritdoc
+     */
+    public static function tableName() {
+        return 'user';
+    }
+
+    /**
+     * @inheritdoc
+     */
+    public function behaviors() {
+        return [
+            TimestampBehavior::className(),
+        ];
+    }
+
+    /**
+     * @inheritdoc
+     */
+    public function rules() {
+        return [
+            [['username', 'email'], 'required'],
+            [['password_string', 'password_string_repeat'], 'required', 'on' => self::SCENARIO_NEW_FELHASZNALO],
+            [['password_string'], 'compare', 'compareAttribute' => 'password_string_repeat', 'enableClientValidation' => false],
+            [['username', 'email'], 'trim'],
+            [['username', 'email'], 'string', 'max' => 255],
+            [['username'], 'filter', 'filter' => 'strip_tags'],
+            [['email'], 'email'],
+            ['status', 'default', 'value' => self::STATUS_ACTIVE],
+            ['status', 'in', 'range' => [self::STATUS_ACTIVE, self::STATUS_DELETED, self::STATUS_INACTIVE]],
+            [['password_reset_token'], 'unique'],
+            [['rest_token'], 'unique'],
+        ];
+    }
+
+    public function scenarios() {
+        return [
+            self::SCENARIO_NEW_FELHASZNALO => ['username', 'email', 'password_string', 'password_string_repeat', 'status'],
+            self::SCENARIO_EDIT_FELHASZNALO => ['username', 'email', 'password_string', 'password_string_repeat', 'status'],
+            self::SCENARIO_EDIT_KISERLETISZEMELY => ['username', 'email', 'password_string', 'password_string_repeat'],
+            self::SCENARIO_EDIT_REST => ['rest_token'],
+        ];
+    }
+
+    public function attributeLabels() {
+        return [
+            'nev' => 'Felhasználónév',
+            'nem' => 'Neme',
+            'szulev' => 'Születési év',
+            'email' => 'E-mail',
+            'statusz' => 'Státusz',
+            'utolso_bejelentkezes' => 'Utolsó bejelentkezés',
+            'letrehozva' => 'Létrehozva',
+            'modositva' => 'Módosítva',
+            'password_string' => 'Jelszó',
+            'password_string_repeat' => 'Jelszó ismét',
+            'megjegyzes' => 'Megjegyzés',
+        ];
+    }
+
+//    public function getFelhasznaloToSzerepkorok() {
+//        return $this->hasMany(FelhasznaloToSzerepkor::className(), ['felhasznalo_id' => 'id']);
+//    }
+
+    public static function statuszList() {
+    	return [
+            self::STATUS_ACTIVE => \Yii::t('backend', 'USER_STATUS_ACTIVE'),
+            self::STATUS_DELETED => \Yii::t('backend', 'USER_STATUS_DELETED'),
+    	];
+    }
+    
+    public function getStatuszText() {
+    	return self::statuszList()[$this->statusz];
+    }
+
+//    public static function nemList() {
+//        return [
+//            self::NEM_FERFI => \Yii::t('backend', 'USER_NEM_FERFI'),
+//            self::NEM_NO => \Yii::t('backend', 'USER_NEM_NO'),
+//        ];
+//    }
+
+//    public function getNemText() {
+//        return self::nemList()[$this->nem];
+//    }
+
+//    public function handleSzerepkor($insert) {
+//
+//        if($insert) {
+//            $ftsz = new FelhasznaloToSzerepkor();
+//            $ftsz->felhasznalo_id = $this->id;
+//            $ftsz->projekt_id = \Yii::$app->user->projekt;
+//            $ftsz->szerepkor = 0;
+//            $ftsz->save(false);
+//        }
+//    }
+
+    /**
+     * @inheritdoc
+     */
+    public static function findIdentity($id) {
+        return static::findOne(['id' => $id, 'status' => self::STATUS_ACTIVE]);
+    }
+
+    /**
+     * @inheritdoc
+     */
+    public static function findIdentityByAccessToken($token, $type = null) {
+        if(($felhasznalo = static::findOne(['rest_token' => $token])) !== NULL){
+            return $felhasznalo;
+        } else {
+            return false;
+        }
+    }
+
+    /**
+     * Felhasználó lekérése e-mail cím alapján
+     *
+     * @param string $email
+     * @return static|null
+     */
+    public static function findByEmail($email) {
+        return static::findOne(['email' => $email, 'status' => self::STATUS_ACTIVE]);
+    }
+
+
+    /**
+     * Finds user by password reset token
+     *
+     * @param string $token password reset token
+     * @return static|null
+     */
+    public static function findByPasswordResetToken($token) {
+        if (!static::isPasswordResetTokenValid($token)) {
+            return null;
+        }
+
+        return static::findOne([
+            'password_reset_token' => $token,
+            'status' => self::STATUS_ACTIVE,
+        ]);
+    }
+
+    /**
+     * Finds out if password reset token is valid
+     *
+     * @param string $token password reset token
+     * @return bool
+     */
+    public static function isPasswordResetTokenValid($token) {
+        if (empty($token)) {
+            return false;
+        }
+
+        $timestamp = (int) substr($token, strrpos($token, '_') + 1);
+        $expire = Yii::$app->params['user.passwordResetTokenExpire'];
+        return $timestamp + $expire >= time();
+    }
+
+    /**
+     * @inheritdoc
+     */
+    public function getId() {
+        return $this->getPrimaryKey();
+    }
+
+    /**
+     * @inheritdoc
+     */
+    public function getAuthKey() {
+        return $this->auth_key;
+    }
+
+    /**
+     * @inheritdoc
+     */
+    public function validateAuthKey($authKey) {
+        return $this->getAuthKey() === $authKey;
+    }
+
+    /**
+     * Validates password
+     *
+     * @param string $password password to validate
+     * @return bool if password provided is valid for current user
+     */
+    public function validatePassword($password) {
+        if (strlen($this->password_hash) == 32) {
+            return $password == $this->password_hash;
+        } else {
+            return Yii::$app->security->validatePassword($password, $this->password_hash);
+        }
+    }
+
+    /**
+     * Generates password hash from password and sets it to the model
+     *
+     * @param string $password
+     */
+    public function setPassword($password) {
+        $this->password_hash = Yii::$app->security->generatePasswordHash($password);
+    }
+
+    /**
+     * Generates "remember me" authentication key
+     */
+    public function generateAuthKey() {
+        $this->auth_key = Yii::$app->security->generateRandomString();
+    }
+
+    /**
+     * Generates new password reset token
+     */
+    public function generatePasswordResetToken() {
+        $this->password_reset_token = Yii::$app->security->generateRandomString() . '_' . time();
+    }
+
+    /**
+     * Removes password reset token
+     */
+    public function removePasswordResetToken() {
+        $this->password_reset_token = null;
+    }
+
+//    public static function getSzerepkorok($selectable_only = false) {
+//
+//        $result = [];
+//
+//        $result[self::ROLE_PROJEKT_FELHASZNALO] = \Yii::t('backend', 'ROLE_PROJEKT_FELHASZNALO');
+//        $result[self::ROLE_PROJEKT_ADMINISZTRATOR] = \Yii::t('backend', 'ROLE_PROJEKT_ADMINISZTRATOR');
+//        $result[self::ROLE_PROJEKT_KISERLETISZEMELY] = \Yii::t('backend', 'ROLE_PROJEKT_KISERLETISZEMELY');
+//        if(\Yii::$app->user->szerepkor != Felhasznalo::ROLE_PROJEKT_ADMINISZTRATOR &&
+//            \Yii::$app->user->szerepkor != Felhasznalo::ROLE_PROJEKT_FELHASZNALO &&
+//            \Yii::$app->user->szerepkor != Felhasznalo::ROLE_PROJEKT_KISERLETISZEMELY) {
+//            $result[self::ROLE_ADMIN] = \Yii::t('backend', 'ROLE_ADMIN');
+//        }
+//
+//        return $result;
+//    }
+
+//    public static function processAfterLogin($event) {
+//        $user = $event->identity;
+//        $user->utolso_bejelentkezes = date('Y-m-d H:i:s');
+//        $user->update(false, ['utolso_bejelentkezes']);
+//
+//        \Yii::$app->user->neme = $user->nem;
+//
+//    }
+
+//    public function getJeloleskSzId(){
+//        return 'kSz'.$this->id;
+//    }
+
+//    public function generateActivationKey($email){
+//        $this->activation_key = sha1(mt_rand(10000, 99999).time().$email);
+//    }
+
+    /**
+     * Felhasználó lekérése aktivációs kulcs alapján
+     *
+     * @param string $email
+     * @return static|null
+     */
+    public static function findByActivationKey($token) {
+        return static::findOne(['activation_key' => $token, 'status' => self::STATUS_INACTIVE]);
+    }
+
+    public function generateRestToken(){
+        $this->rest_token = sha1(mt_rand(10000, 99999).time().$this->email);
+        $this->scenario = User::SCENARIO_EDIT_REST;
+        $this->save();
+    }
+
+}
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
+Migracio:
+<?php
+
+use yii\db\Migration;
+
+class m130524_201442_init extends Migration
+{
+    public function up()
+    {
+        $tableOptions = null;
+        if ($this->db->driverName === 'mysql') {
+            // http://stackoverflow.com/questions/766809/whats-the-difference-between-utf8-general-ci-and-utf8-unicode-ci
+            $tableOptions = 'CHARACTER SET utf8 COLLATE utf8_unicode_ci ENGINE=InnoDB';
+        }
+
+        $this->createTable('{{%user}}', [
+            'id' => $this->primaryKey(),
+            'username' => $this->string()->notNull()->unique(),
+            'auth_key' => $this->string(32)->notNull(),
+            'password_hash' => $this->string()->notNull(),
+            'password_reset_token' => $this->string()->unique(),
+            'email' => $this->string()->notNull()->unique(),
+
+            'status' => $this->smallInteger()->notNull()->defaultValue(10),
+            'created_at' => $this->integer()->notNull(),
+            'updated_at' => $this->integer()->notNull(),
+        ], $tableOptions);
+        
+        $this->addColumn('user', 'rest_token', $this->string()->after('username')->unique());
+        
+        $this->insert('user', [
+            'username' => 'user',
+            'auth_key' => \Yii::$app->getSecurity()->generateRandomString(),
+            'password_hash' => \Yii::$app->getSecurity()->generatePasswordHash('user'),
+            'password_reset_token' => null,
+            'email' => 'user@gmail.com.hu',
+            'status' => 10,
+            'created_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+    }
+
+    public function down()
+    {
+        $this->dropTable('{{%user}}');
+    }
+}
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
